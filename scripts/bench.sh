@@ -4,6 +4,10 @@
 # 用法:
 #   bench.sh -e <exp_id> -m <model.gguf> [其余参数原样透传给 llama-bench]
 #   透传示例: -ngl 0 | -ngl 999 -ot "per_layer_token_embd\.weight=CPU" | -fa on | -t 64
+#   支持批量多值（llama-bench 原生语法，一次进程跑完整批）:
+#     -ngl 0,16,32,48        离散多值
+#     -ngl 0-48+8            范围 0..48 步长 8
+#     -t 64,128,256          多值可组合，产出 = 各参数值的笛卡尔积
 #   透传参数不得包含 -m/-p/-n/-r/-o/-oe/--progress（口径与输出格式由本脚本固定）
 #
 # 环境变量:
@@ -19,7 +23,8 @@
 #   results.json llama-bench -o json 原始结果（含每次重复的 samples）
 #   bench.log    完整 stderr（warning / 进度 / md 汇总表，人类可读）
 #   gpu_mem.csv  GPU 显存采样（无 nvidia-smi 时仅表头）
-#   host_mem.csv 进程 RSS 峰值 / 系统已用内存采样
+#   host_mem.csv 进程当前 RSS / 累计 RSS 峰值(HWM) / 系统已用内存采样
+#                （多配置批量运行时，parse_bench.py 按 test_time 分段归属到各配置）
 #   FAILED       退出码非 0 时创建（parse_bench.py 跳过该目录）
 
 set -euo pipefail
@@ -29,11 +34,12 @@ RAW_ROOT="${BENCH_RAW_ROOT:-$REPO_ROOT/data/raw}"
 
 usage() {
     cat <<'EOF'
-bench.sh — 统一封装 llama-bench：跑一次基准，原始结果全量落盘
+bench.sh — 统一封装 llama-bench：跑一次基准（支持多值批量），原始结果全量落盘
 
 用法:
   bench.sh -e <exp_id> -m <model.gguf> [其余参数原样透传给 llama-bench]
   透传示例: -ngl 0 | -ngl 999 -ot "per_layer_token_embd\.weight=CPU" | -fa on | -t 64
+  批量示例: -ngl 0,16,32,48 | -ngl 0-48+8 | -t 64,128,256（llama-bench 原生多值语法）
   透传参数不得包含 -m/-p/-n/-r/-o/-oe/--progress（口径与输出格式由本脚本固定）
 
 环境变量:
@@ -94,7 +100,7 @@ echo "== cmd:    $CMD_STR"
 echo "== out:    $OUTDIR"
 
 echo "timestamp,gpu_mem_used_mib" > "$OUTDIR/gpu_mem.csv"
-echo "timestamp,proc_rss_hwm_mib,sys_used_mib" > "$OUTDIR/host_mem.csv"
+echo "timestamp,proc_rss_mib,proc_rss_hwm_mib,sys_used_mib" > "$OUTDIR/host_mem.csv"
 
 # ---------- 启动基准 + 内存采样 ----------
 START_TS="$(date -Is)"; START_EPOCH="$(date +%s)"
@@ -116,9 +122,11 @@ fi
 
 (
     while kill -0 "$MAIN_PID" 2>/dev/null; do
-        hwm="$(awk '/^VmHWM/{print $2}' "/proc/$MAIN_PID/status" 2>/dev/null)" || true
+        rh="$(awk '/^VmRSS/{r=$2}/^VmHWM/{h=$2}END{print r+0, h+0}' "/proc/$MAIN_PID/status" 2>/dev/null)" || true
         sysmib="$(awk '/^MemTotal/{t=$2}/^MemAvailable/{a=$2}END{if(t&&a)print int((t-a)/1024)}' /proc/meminfo 2>/dev/null)" || true
-        echo "$(date +%s),${hwm:+$((hwm/1024))},${sysmib:-}" >> "$OUTDIR/host_mem.csv"
+        rss_mib=0; hwm_mib=0
+        IFS=' ' read -r rss_mib hwm_mib <<< "${rh:-0 0}" || true
+        echo "$(date +%s),$((rss_mib/1024)),$((hwm_mib/1024)),${sysmib:-}" >> "$OUTDIR/host_mem.csv"
         sleep "$INTERVAL"
     done
 ) &
@@ -184,10 +192,11 @@ except Exception as e:
     print(f"WARN: 摘要解析失败: {e}")
     sys.exit(0)
 for r in rows:
+    tag = f"ngl={r.get('n_gpu_layers')} t={r.get('n_threads')} ot={r.get('tensor_buft_overrides')}"
     if int(r.get("n_gen", 0)) == 0 and int(r.get("n_prompt", 0)) > 0:
-        print(f"pp{r['n_prompt']}: {float(r['avg_ts']):.2f} tok/s (+/-{float(r['stddev_ts']):.2f})")
+        print(f"pp{r['n_prompt']}: {float(r['avg_ts']):.2f} tok/s (+/-{float(r['stddev_ts']):.2f})  [{tag}]")
     elif int(r.get("n_prompt", 0)) == 0 and int(r.get("n_gen", 0)) > 0:
-        print(f"tg{r['n_gen']}: {float(r['avg_ts']):.2f} tok/s (+/-{float(r['stddev_ts']):.2f})")
+        print(f"tg{r['n_gen']}: {float(r['avg_ts']):.2f} tok/s (+/-{float(r['stddev_ts']):.2f})  [{tag}]")
 PYEOF
 
 echo "== done: 原始结果已存 $OUTDIR"

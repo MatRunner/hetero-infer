@@ -1,6 +1,6 @@
 # ARM+A100 异构单机部署的性能上限研究
 
-> **主问题：110GB 模型在这台 80GB A100 + 500GB ARM 内存的服务器上，性能上限在哪？无优化基线距上限多少？gap 由什么构成？每个优化手段能收回多少？**
+> **主问题：110GB 模型在这台 40GB A100 + 500GB ARM 内存的服务器上，性能上限在哪？无优化基线距上限多少？gap 由什么构成？每个优化手段能收回多少？**
 >
 > 方法论：理论上限推导 → 基线实测 → gap 三层分解 → 手段逐项验证 → 瀑布图对账。产出物是**一张 gap 瀑布图**：从基线出发，每个手段收回一段，逼近本机可达上限，残差逐项归因。
 
@@ -8,15 +8,15 @@
 
 | 项 | 值 |
 | --- | --- |
-| GPU | A100 80GB PCIe（HBM 1939 GB/s，BF16 312 TFLOPS） |
-| Host | ARM 服务器，500GB 内存 |
+| GPU | A100 40GB PCIe（GA100，HBM 1555 GB/s，BF16 312 TFLOPS） |
+| Host | ARM 服务器，500GB 内存，DDR5-4800，2 socket × 8 通道（理论：单节点 307 GB/s / 聚合 614 GB/s）；CPU 2.9 GHz × 2×128-bit FMA/cycle（FP32 ≈ 46 GFLOPS/core），每 socket 64 核 × 2 = 128 物理核（SMT2 = 256 逻辑核，总算力 ~5.9 TFLOPS） |
 | 模型 | Qwen3.8-Flash-Next（qwen4exp）UD-Q4_K_XL，110GB，~131B 总参 / ~6B 激活，48 层 / 512 专家 |
 | 引擎 | llama.cpp（已构建，支持 qwen4exp） |
 
 D1 核查清单（决定后续所有分母）：
 
 ```bash
-lscpu | grep -i numa            # NUMA 拓扑：单 socket 还是多路（鲲鹏 2P/4P 常见）→ 决定 L3 的预期收益
+lscpu | grep -i numa            # NUMA 拓扑：已确认 2P；待实测 GPU 所在节点与跨节点延迟 → 决定 L3 的预期收益
 numactl -H                      # 各节点内存分布 + GPU 挂在哪个节点
 nvidia-smi -q | grep -A4 "GPU Link Info"   # PCIe 代际/宽度
 # host 内存带宽实测（STREAM triad），多路机器分"本节点/跨节点"各测一次
@@ -29,7 +29,7 @@ nvidia-smi -q | grep -A4 "GPU Link Info"   # PCIe 代际/宽度
 ### 1.1 三层上限
 
 ```
-U_ideal    虚上限：全 GPU 常驻的 roofline（decode ~540 tok/s）        —— 不可达（110>80），仅定义总 gap
+U_ideal    虚上限：全 GPU 常驻的 roofline（decode ~430 tok/s）        —— 不可达（110>40），仅定义总 gap
 U_machine  本机可达上限：U_ideal − 显存不足被迫卸载的最小代价          —— 放置策略的最优解
 P_final    实测最优：U_machine − 实现层 gap（可优化）− 残差（不可消除）
 ```
@@ -59,7 +59,7 @@ Gap_total = U_ideal − B0
 
 ```
 每 token 读取 ≈ 6B 激活 × 0.6 B/param(Q4) ≈ 3.6 GB
-U_ideal(decode) = 1939 GB/s ÷ 3.6 GB ≈ 540 tok/s（1.9 ms/token）
+U_ideal(decode) = 1555 GB/s ÷ 3.6 GB ≈ 430 tok/s（2.3 ms/token）
 ```
 
 **Prefill（算力 roofline）**：
@@ -69,23 +69,25 @@ U_ideal(decode) = 1939 GB/s ÷ 3.6 GB ≈ 540 tok/s（1.9 ms/token）
 U_ideal(prefill) = 312 TFLOPS ÷ 12 GFLOP ≈ 26000 tok/s（预期 MFU 10-25%）
 ```
 
-**Host 侧上限（B0 的理论锚点）**：B0 的 decode 上限 = STREAM 带宽 ÷ 3.6GB（D1 实测后填入；参考 DGX Spark 同模型 25 tok/s，A100 服务器 ARM 侧带宽决定 B0 落点）。
+**Host 侧上限（B0 的理论锚点）**：B0 的 decode 上限 = min(带宽上限, 算力上限)。
+- 带宽侧：STREAM ÷ 3.6GB。DDR5-4800 × 8 通道 × 2 socket：单节点理论上限 ~85 tok/s（307÷3.6，STREAM 通常打 7-8 折 → ~60-70 tok/s），跨节点聚合理论上限 ~170 tok/s（614÷3.6，但远端访问延迟惩罚大，默认 interleaved 布局下达不到）。实测后填入；参考 DGX Spark 同模型 25 tok/s。
+- 算力侧：2×128-bit FMA/cycle = 256 bit/cycle（FP32 16 FLOP/cycle）× 2.9 GHz ≈ 46 GFLOPS/core × 128 物理核 ≈ **5.9 TFLOPS**（SMT 不增 FMA 管线，256 逻辑核的 FLOPS 不变，仅隐藏访存延迟）。B0 每 token 计算 ~12 GFLOP（2×6B 激活）→ 算力上限 ~500 tok/s——远高于带宽上限，**B0 判定为带宽约束**（dequant 附带开销会进一步压低实际值）。注：llama-bench 默认线程 = 逻辑核/2 = 128，恰为物理核数，B0 默认配置即合理。
 
 **Step-time 预算（归因用的分解公式）**：
 
 ```
 T_token = T_HBM + T_launch + T_arm_offload + T_ple + T_sample
-预测：T_HBM ~1.9ms | T_launch 1-3ms（48层×~20 kernel×3µs，llama.cpp 无 CUDA Graph）
+预测：T_HBM ~2.3ms | T_launch 1-3ms（48层×~20 kernel×3µs，llama.cpp 无 CUDA Graph）
      | T_arm_offload 0.1-0.5ms×卸载层数 | T_ple 0.1-0.5ms | T_sample ~0.1ms
 ```
 
-**Q1 的潜在头版发现**：6B 激活让权重读取只要 1.9ms，而 launch 间隙可能是同量级——若实测证实 decode 是 launch-bound 而非带宽-bound，就直接解释了 vLLM/TRT-LLM 为什么上 CUDA Graph。
+**Q1 的潜在头版发现**：6B 激活让权重读取只要 2.3ms，而 launch 间隙可能是同量级——若实测证实 decode 是 launch-bound 而非带宽-bound，就直接解释了 vLLM/TRT-LLM 为什么上 CUDA Graph。
 
 ### 2.2 基线 B0 实测
 
 ```bash
-llama-bench -m model.gguf -ngl 0 -p 512 -n 128 -r 3 -c 32768   # 默认 -t、mmap、无 fa
-# 补：-t 扫描（nproc/2, nproc, nproc×2）找默认线程是否已经最优（本身是 L3 的一部分）
+llama-bench -m model.gguf -ngl 0 -p 512 -n 128 -r 3   # 默认 -t、mmap、无 fa
+# 补：-t 扫描（64/128/192/256，物理核 128 为锚点；128 vs 256 直接检验 SMT 对 memory-bound GEMV 的收益）找默认线程是否已经最优（本身是 L3 的一部分）
 ```
 
 读数：pp512 / tg128 / ARM 内存占用。**B0 的 tg × 3.6GB ÷ STREAM 带宽 = host 侧效率**，若 <50% 则 B0 连 host 上限都没跑满（说明 gap_实现 在纯 host 路径就存在，NUMA/线程即回收手段）。
@@ -116,7 +118,7 @@ llama-bench -m model.gguf -ngl 0 -p 512 -n 128 -r 3 -c 32768   # 默认 -t、mma
 
 - **机制**：PLE 每 token 只稀疏 gather（KB 级）→ 放 host 近无损；专家是激活权重全量读取 → 放 host 每层每 token ~14MB 走 ARM 吞吐
 - **读数**：斜率线性 → 符合模型；非线性 → 有重叠/串行化，nsys 细查。斜率 ÷ 每层激活字节 = ARM 侧有效吞吐，对比 STREAM 判定算力/带宽受限
-- 显存账：110 − PLE(~27GB) ≈ 83GB > 80 − KV − buffer，预期最优 = PLE + ~10 层专家在 host，此即 U_machine 的实测定位
+- 显存账：110 − PLE(~27GB) ≈ 83GB ≫ 40 − KV − buffer，仅专家就需 host 承载 ~43GB+（粗估 ~25 层，待 D1 tensor 清单回填核准），预期最优 = PLE + ~25 层专家在 host，此即 U_machine 的实测定位
 
 ### L2 Flash Attention（`-fa on`，回收 gap_实现）
 
@@ -126,7 +128,7 @@ llama-bench -m model.gguf -ngl 0 -p 512 -n 128 -r 3 -c 32768   # 默认 -t、mma
 
 ### L3 NUMA 绑定与线程（回收 gap_实现）
 
-- **机制与预测**：多路 ARM（鲲鹏 2P/4P）跨节点访问延迟 ~2×，110GB 权重默认 interleaved 分布 → gather/读取大量远端命中。预测纯 host 和重卸载配置提升 10-30%；单 socket 则收益≈0（"诚实零结果"也是结果）
+- **机制与预测**：已确认 2P（跨节点访问延迟 ~2×），110GB 权重默认 interleaved 分布 → gather/读取大量远端命中。预测纯 host 和重卸载配置提升 10-30%
 - **测**：`numactl --cpunodebind N --membind N`（含 GPU 所在节点 vs 对侧节点两组）× B0 和 L1 最优配置；配合 `-t` 扫描
 - **读数**：绑计算节点+本地内存的增益 = 跨节点代价；GPU 对侧节点绑定的损失 = PCIe 跨节点代价。两个数字都是异构部署的通用结论
 
@@ -146,7 +148,7 @@ llama-bench -m model.gguf -ngl 0 -p 512 -n 128 -r 3 -c 32768   # 默认 -t、mma
 
 ```
 tg(tok/s)
-U_ideal 540 ─────────────────────────────────┐(虚上限)
+U_ideal 430 ─────────────────────────────────┐(虚上限)
 U_machine ~??? ────────┐(放置最优, D2 实测定位)  │
 P_final ~??? ──┐        │                       │
 B0 ~?? ──┤     │        │                       │
@@ -162,7 +164,7 @@ MTP 不属于 gap 填补：一次权重读取验证 k 个 draft token，**分母
 
 - 前置：MTP head（shared-Q8_0，2.6GB）+ PR #28243 构建（若现有构建无 `--spec-type draft-mtp`）
 - 测：开/关 tg 对比、日志 `draft acceptance`、`--spec-draft-n-max` 扫 2/3/4、temp 0/0.7/1.0 的 acceptance 变化
-- **A100 特有视角（带宽经济学）**：draft head 2.6GB 每次 draft 全量读取，A100 PCIe 1.9TB/s 下占 ~1.3ms，相对成本高于 B200(8TB/s) → 预测加速比低于参考值 1.67x。低带宽卡上投机解码收益缩水，这个结论本身有传播价值
+- **A100 特有视角（带宽经济学）**：draft head 2.6GB 每次 draft 全量读取，A100 40G PCIe 1.6TB/s 下占 ~1.7ms，相对成本高于 B200(8TB/s) → 预测加速比低于参考值 1.67x。低带宽卡上投机解码收益缩水，这个结论本身有传播价值
 - MoE 加成：verify 一步算 k+1 个 token、专家激活取 union，每步权重读取远小于 (k+1) 倍 → MTP 在 MoE 上比 dense 更便宜（预测接受长度增加时衰减更平缓）
 
 ## 5. 支线（时间富余再做）：UD 动态量化 vs uniform
@@ -187,7 +189,7 @@ MTP 不属于 gap 填补：一次权重读取验证 k 个 draft token，**分母
 - GitHub：脚本 + CSV + profiling 截图
 - 博客反哺：kvcache.md、从零学习模型量化.md、再战transformer.md（MoE 放置实证）、新篇"投机解码"
 
-> 简历 bullet（数字待填）：在 ARM+A100 80G 异构单机上研究 131B-A6B MoE 模型的推理性能上限：推导带宽 roofline（decode 理论 __ tok/s），将"基线 → 上限"的总 gap 分解为物理约束/实现损耗/固有残差三层；通过放置策略（51B PLE 表驻留 host 近无损）、NUMA 绑定、KV 量化等手段将性能从基线 __ tok/s 提升至 __ tok/s（本机可达上限的 __%），逐项量化各手段贡献；经 nsys 归因定位 decode 为 __-bound（launch 间隙占 __%），实测 MTP 投机解码进一步突破带宽上限 __x（acceptance __%）。
+> 简历 bullet（数字待填）：在 ARM+A100 40G 异构单机上研究 131B-A6B MoE 模型的推理性能上限：推导带宽 roofline（decode 理论 __ tok/s），将"基线 → 上限"的总 gap 分解为物理约束/实现损耗/固有残差三层；通过放置策略（51B PLE 表驻留 host 近无损）、NUMA 绑定、KV 量化等手段将性能从基线 __ tok/s 提升至 __ tok/s（本机可达上限的 __%），逐项量化各手段贡献；经 nsys 归因定位 decode 为 __-bound（launch 间隙占 __%），实测 MTP 投机解码进一步突破带宽上限 __x（acceptance __%）。
 
 ## 参考
 

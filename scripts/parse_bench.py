@@ -8,8 +8,11 @@
     - 扫描 <raw-root>/<exp_id>/<run_ts>/ 目录（bench.sh 的产物）
     - 跳过失败运行（FAILED 标记 / exit_code != 0 / results.json 缺失或损坏）
     - 全量重建输出 CSV（按运行时间升序），幂等可重复执行
-    - llama-bench 输出为每测试一行（pp 行 n_gen=0，tg 行 n_prompt=0），
-      本脚本将同一次运行的 pp/tg 两行合并为一行，并聚合内存采样峰值
+    - 支持批量多值运行（-ngl 0,16,32 / -t a,b,c 等）：llama-bench 一次进程输出
+      多个测试配置，本脚本按配置分组，每个配置输出一行（pp/tg 两测试合并）
+    - 内存峰值按 test_time 分段归属到各配置：第 i 个测试的区间为
+      (前一测试结束时刻, 本测试结束时刻]，区间内采样最大值即该测试的峰值。
+      近似值（含前一测试的尾部与 warmup），单配置运行时等价于全程峰值
 
 CSV 列（CLAUDE.md 约定：实验 ID、完整命令行、日期、pp、tg、显存峰值、host 内存）:
     exp_id, run_ts, command, model, model_size_gib,
@@ -24,6 +27,7 @@ import argparse
 import csv
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -38,6 +42,15 @@ FIELDS = [
     "gpu_mem_peak_mib", "host_rss_peak_gib", "host_sys_used_peak_gib",
     "backends", "gpu_info", "cpu_info", "build_commit",
     "duration_s", "exit_code", "raw_dir",
+]
+
+# 区分同一 results.json 内多个测试配置的全部字段（组合为分组键）
+CFG_FIELDS = [
+    "model_filename", "n_gpu_layers", "n_cpu_moe", "tensor_buft_overrides",
+    "flash_attn", "n_threads", "cpu_mask", "cpu_strict", "use_mmap",
+    "type_k", "type_v", "split_mode", "main_gpu", "no_kv_offload",
+    "n_batch", "n_ubatch", "devices", "tensor_split", "use_direct_io",
+    "embeddings", "no_op_offload", "no_host", "fit_target", "fit_min_ctx",
 ]
 
 FA_MAP = {-1: "auto", 0: "off", 1: "on"}
@@ -55,24 +68,58 @@ def load_json(path: Path):
         return None
 
 
-def col_max(path: Path, col: str):
-    """读 CSV 某列的最大数值；文件缺失/列缺失/无有效值返回 None"""
-    if not path.is_file():
+def to_epoch(ts):
+    """ISO 时间字符串 -> epoch 秒；支持 'Z' 与 '+08:00' 两种后缀"""
+    if not ts:
         return None
     try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def load_samples(path: Path, col: str):
+    """读采样 CSV 的 (timestamp, value) 列表；文件/列缺失返回空表"""
+    if not path.is_file():
+        return []
+    try:
+        out = []
         with path.open(newline="", encoding="utf-8") as f:
-            vals = []
             for row in csv.DictReader(f):
-                v = (row.get(col) or "").strip()
-                if v:
-                    try:
-                        vals.append(float(v))
-                    except ValueError:
-                        pass
-            return max(vals) if vals else None
+                try:
+                    e = float(row.get("timestamp") or "")
+                    v = float((row.get(col) or "").strip())
+                except (TypeError, ValueError):
+                    continue
+                out.append((e, v))
+        return out
     except Exception as e:
         warn(f"读取 {path} 失败: {e}")
-        return None
+        return []
+
+
+def peaks_per_test(run_start, rows, samples):
+    """按 test_time 把采样分段，返回与 rows 等长的每测试峰值列表。
+
+    第 i 个测试的区间 = (第 i-1 个测试的 test_time, 第 i 个测试的 test_time]，
+    首个区间下界为运行开始时刻（meta.start）。
+    """
+    n = len(rows)
+    if not samples:
+        return [None] * n
+    bounds = []
+    prev = run_start
+    for r in rows:
+        t = to_epoch(r.get("test_time"))
+        if t is None:
+            t = prev  # test_time 缺失时区间退化为空
+        bounds.append((prev, t))
+        prev = t
+    out = []
+    for lo, hi in bounds:
+        vals = [v for e, v in samples if e is not None and lo <= e <= hi]
+        out.append(max(vals) if vals else None)
+    return out
 
 
 def fmt(v, nd=3):
@@ -80,16 +127,21 @@ def fmt(v, nd=3):
 
 
 def pick_test(rows, kind: str):
-    """从 llama-bench results.json 的行中取 pp（n_gen=0）或 tg（n_prompt=0）行"""
+    """从（同一配置的）测试行中取 pp（n_gen=0）或 tg（n_prompt=0）行"""
     if kind == "pp":
         cand = [r for r in rows if int(r.get("n_gen", 0)) == 0 and int(r.get("n_prompt", 0)) > 0]
     else:
         cand = [r for r in rows if int(r.get("n_prompt", 0)) == 0 and int(r.get("n_gen", 0)) > 0]
-    if not cand:
-        return None
-    if len(cand) > 1:
-        warn(f"{kind} 测试多于一行（可能传了多值参数），取第一行")
-    return cand[0]
+    return cand[0] if cand else None
+
+
+def config_key(row):
+    return tuple((f, row.get(f)) for f in CFG_FIELDS)
+
+
+def group_max(idxs, peaks):
+    vals = [peaks[i] for i in idxs if peaks[i] is not None]
+    return max(vals) if vals else None
 
 
 def parse_run(run_dir: Path):
@@ -109,57 +161,66 @@ def parse_run(run_dir: Path):
         warn(f"跳过 {run_dir.name}: results.json 为空或格式异常")
         return None
 
-    pp = pick_test(rows, "pp")
-    tg = pick_test(rows, "tg")
-    if pp is None or tg is None:
-        warn(f"跳过 {run_dir.name}: 未找到 pp/tg 测试行")
-        return None
+    # 内存采样按 test_time 分段归属到每个测试行
+    run_start = to_epoch(meta.get("start"))
+    gpu_peaks = peaks_per_test(run_start, rows, load_samples(run_dir / "gpu_mem.csv", "gpu_mem_used_mib"))
+    rss_peaks = peaks_per_test(run_start, rows, load_samples(run_dir / "host_mem.csv", "proc_rss_mib"))
+    sys_peaks = peaks_per_test(run_start, rows, load_samples(run_dir / "host_mem.csv", "sys_used_mib"))
 
-    # 内存峰值（任一基准行都行，两次取相同环境）
-    base = pp
-    gpu_peak = col_max(run_dir / "gpu_mem.csv", "gpu_mem_used_mib")
-    rss_peak = col_max(run_dir / "host_mem.csv", "proc_rss_hwm_mib")
-    sys_peak = col_max(run_dir / "host_mem.csv", "sys_used_mib")
+    # 按配置分组（保持首次出现顺序）
+    groups = {}
+    for i, r in enumerate(rows):
+        groups.setdefault(config_key(r), []).append(i)
 
-    model_size = base.get("model_size")
+    records = []
+    for idxs in groups.values():
+        grp_rows = [rows[i] for i in idxs]
+        pp = pick_test(grp_rows, "pp")
+        tg = pick_test(grp_rows, "tg")
+        if pp is None or tg is None:
+            warn(f"跳过 {run_dir.name} 的一个配置组: 未同时找到 pp/tg 测试行")
+            continue
+        base = pp  # 组内配置字段相同，任取一行
+        model_size = base.get("model_size")
 
-    def ms(r):
-        return fmt(float(r["avg_ns"]) / 1e6, 2) if r.get("avg_ns") is not None else ""
+        def ms(r):
+            return fmt(float(r["avg_ns"]) / 1e6, 2) if r.get("avg_ns") is not None else ""
 
-    return {
-        "exp_id": meta.get("exp_id", run_dir.parent.name),
-        "run_ts": meta.get("start", run_dir.name),
-        "command": meta.get("command", ""),
-        "model": base.get("model_filename", ""),
-        "model_size_gib": fmt(float(model_size) / 2**30, 2) if model_size is not None else "",
-        "ngl": base.get("n_gpu_layers", ""),
-        "ncmoe": base.get("n_cpu_moe", ""),
-        "tensor_buft_overrides": base.get("tensor_buft_overrides", ""),
-        "flash_attn": FA_MAP.get(base.get("flash_attn"), base.get("flash_attn", "")),
-        "n_threads": base.get("n_threads", ""),
-        "use_mmap": base.get("use_mmap", ""),
-        "type_k": base.get("type_k", ""),
-        "type_v": base.get("type_v", ""),
-        "split_mode": base.get("split_mode", ""),
-        "pp_n": pp.get("n_prompt", ""),
-        "pp_tok_s": fmt(pp.get("avg_ts")),
-        "pp_avg_ms": ms(pp),
-        "pp_stddev_tok_s": fmt(pp.get("stddev_ts")),
-        "tg_n": tg.get("n_gen", ""),
-        "tg_tok_s": fmt(tg.get("avg_ts")),
-        "tg_avg_ms": ms(tg),
-        "tg_stddev_tok_s": fmt(tg.get("stddev_ts")),
-        "gpu_mem_peak_mib": int(gpu_peak) if gpu_peak is not None else "",
-        "host_rss_peak_gib": fmt(rss_peak / 1024, 2) if rss_peak is not None else "",
-        "host_sys_used_peak_gib": fmt(sys_peak / 1024, 2) if sys_peak is not None else "",
-        "backends": base.get("backends", ""),
-        "gpu_info": base.get("gpu_info", ""),
-        "cpu_info": base.get("cpu_info", ""),
-        "build_commit": base.get("build_commit", ""),
-        "duration_s": meta.get("duration_s", ""),
-        "exit_code": meta.get("exit_code", ""),
-        "raw_dir": str(run_dir.relative_to(REPO_ROOT)) if run_dir.is_relative_to(REPO_ROOT) else str(run_dir),
-    }
+        records.append({
+            "exp_id": meta.get("exp_id", run_dir.parent.name),
+            "run_ts": meta.get("start", run_dir.name),
+            "command": meta.get("command", ""),
+            "model": base.get("model_filename", ""),
+            "model_size_gib": fmt(float(model_size) / 2**30, 2) if model_size is not None else "",
+            "ngl": base.get("n_gpu_layers", ""),
+            "ncmoe": base.get("n_cpu_moe", ""),
+            "tensor_buft_overrides": base.get("tensor_buft_overrides", ""),
+            "flash_attn": FA_MAP.get(base.get("flash_attn"), base.get("flash_attn", "")),
+            "n_threads": base.get("n_threads", ""),
+            "use_mmap": base.get("use_mmap", ""),
+            "type_k": base.get("type_k", ""),
+            "type_v": base.get("type_v", ""),
+            "split_mode": base.get("split_mode", ""),
+            "pp_n": pp.get("n_prompt", ""),
+            "pp_tok_s": fmt(pp.get("avg_ts")),
+            "pp_avg_ms": ms(pp),
+            "pp_stddev_tok_s": fmt(pp.get("stddev_ts")),
+            "tg_n": tg.get("n_gen", ""),
+            "tg_tok_s": fmt(tg.get("avg_ts")),
+            "tg_avg_ms": ms(tg),
+            "tg_stddev_tok_s": fmt(tg.get("stddev_ts")),
+            "gpu_mem_peak_mib": int(v) if (v := group_max(idxs, gpu_peaks)) is not None else "",
+            "host_rss_peak_gib": fmt(v / 1024, 2) if (v := group_max(idxs, rss_peaks)) is not None else "",
+            "host_sys_used_peak_gib": fmt(v / 1024, 2) if (v := group_max(idxs, sys_peaks)) is not None else "",
+            "backends": base.get("backends", ""),
+            "gpu_info": base.get("gpu_info", ""),
+            "cpu_info": base.get("cpu_info", ""),
+            "build_commit": base.get("build_commit", ""),
+            "duration_s": meta.get("duration_s", ""),
+            "exit_code": meta.get("exit_code", ""),
+            "raw_dir": str(run_dir.relative_to(REPO_ROOT)) if run_dir.is_relative_to(REPO_ROOT) else str(run_dir),
+        })
+    return records
 
 
 def main():
@@ -183,15 +244,15 @@ def main():
 
     records = []
     for run_dir in run_dirs:
-        rec = parse_run(run_dir)
-        if rec is not None:
-            records.append(rec)
+        recs = parse_run(run_dir)
+        if recs:
+            records.extend(recs)
 
     if not records:
         print(f"ERROR: {raw_root} 下没有有效运行（全部失败或为空），未生成 CSV", file=sys.stderr)
         sys.exit(1)
 
-    records.sort(key=lambda r: str(r["run_ts"]))
+    records.sort(key=lambda r: (str(r["run_ts"]), str(r["exp_id"])))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", newline="", encoding="utf-8") as f:
@@ -200,10 +261,10 @@ def main():
         w.writerows(records)
 
     # 摘要
-    print(f"== {len(records)} 次有效运行 -> {out_path}")
-    print(f"{'exp_id':<24} {'run_ts':<26} {'pp_tok_s':>9} {'tg_tok_s':>9} {'gpu_MiB':>9} {'rss_GiB':>8}")
+    print(f"== {len(records)} 行（配置级） -> {out_path}")
+    print(f"{'exp_id':<24} {'ngl':>4} {'t':>4} {'pp_tok_s':>9} {'tg_tok_s':>9} {'gpu_MiB':>9} {'rss_GiB':>8}")
     for r in records:
-        print(f"{str(r['exp_id']):<24} {str(r['run_ts'])[:26]:<26} "
+        print(f"{str(r['exp_id']):<24} {str(r['ngl']):>4} {str(r['n_threads']):>4} "
               f"{str(r['pp_tok_s']):>9} {str(r['tg_tok_s']):>9} "
               f"{str(r['gpu_mem_peak_mib']):>9} {str(r['host_rss_peak_gib']):>8}")
 

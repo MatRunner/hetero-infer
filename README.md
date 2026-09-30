@@ -4,9 +4,9 @@ ARM + A100 异构单机 LLM 推理性能上限研究。目标产出：可复现�
 
 ## 主问题
 
-110GB 的 Qwen3.8-Flash-Next 在 80GB A100 PCIe + 500GB ARM 内存服务器上，性能上限在哪？
+110GB 的 Qwen3.8-Flash-Next 在 40GB A100 PCIe + 500GB ARM 内存服务器上，性能上限在哪？
 
-- **U_ideal**：全 GPU 常驻的虚上限（decode 理论 ~540 tok/s = 1939 GB/s ÷ 3.6 GB/token），不可达（110 > 80），仅定义总 gap
+- **U_ideal**：全 GPU 常驻的虚上限（decode 理论 ~430 tok/s = 1555 GB/s ÷ 3.6 GB/token），不可达（110 > 40），仅定义总 gap
 - **U_machine**：本机可达上限（放置策略最优解）
 - **B0**：`-ngl 0` 纯 host 无优化基线
 
@@ -26,8 +26,8 @@ Gap_total = U_ideal − B0 = gap_物理 + gap_实现 + gap_残差
 
 | 项 | 值 |
 | --- | --- |
-| GPU | A100 80GB PCIe（HBM 1939 GB/s，BF16 312 TFLOPS） |
-| Host | ARM 服务器，500GB 系统内存 |
+| GPU | A100 40GB PCIe（GA100，HBM 1555 GB/s，BF16 312 TFLOPS） |
+| Host | ARM 服务器，500GB 系统内存，DDR5-4800 2P×8ch（理论 307 GB/s/节点，614 GB/s 聚合）；CPU 2.9 GHz × 2×128-bit FMA/cycle，128 物理核（SMT2 = 256 逻辑核），~5.9 TFLOPS FP32 |
 | 模型 | Qwen3.8-Flash-Next（qwen4exp）UD-Q4_K_XL，110GB，~131B 总参 / ~6B 激活，48 层 / 512 专家，含 51B 参数 PLE n-gram 表 |
 | 引擎 | llama.cpp（已构建，支持 qwen4exp；MTP 需按 PR #28243 另行构建） |
 
@@ -60,6 +60,13 @@ BENCH_BIN=<path/to/llama-bench> ./scripts/bench.sh -e b0 -m <model.gguf> -ngl 0 
   -ot "per_layer_token_embd\.weight=CPU"                                            # 最优放置（PLE→CPU）
 BENCH_PREFIX="numactl --cpunodebind 0 --membind 0" ./scripts/bench.sh ...           # NUMA 绑定
 python3 scripts/parse_bench.py                                                      # 解析 → data/results.csv
+```
+
+支持 llama-bench 原生批量语法，一次进程跑完整批（每个配置一行 CSV，内存峰值按 test_time 分段归属到各配置）：
+
+```bash
+./scripts/bench.sh -e b0_tscan -m <model.gguf> -ngl 0 -t 64,128,192,256  # 线程扫描：物理核 128 为锚点，128 vs 256 检验 SMT 收益
+./scripts/bench.sh -e l1_ngl -m <model.gguf> -ngl 0-20+4                             # 放置粗扫（40G 下 ngl>21 必 OOM，边界另跑）
 ```
 
 约定：

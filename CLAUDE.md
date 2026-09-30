@@ -4,17 +4,17 @@
 
 ARM+A100 异构单机 LLM 推理性能上限研究。目标产出：可复现的 benchmark 脚本 + 实验数据（CSV）+ 系统性分析报告 + gap 瀑布图，最终形成量化结论（简历项目级质量）。
 
-**主问题：110GB 的 Qwen3.8-Flash-Next 在 80G A100 + 500G ARM 内存服务器上，性能上限在哪？无优化基线距上限多少？gap 由什么构成？每个优化手段收回多少？**
+**主问题：110GB 的 Qwen3.8-Flash-Next 在 40G A100 + 500G ARM 内存服务器上，性能上限在哪？无优化基线距上限多少？gap 由什么构成？每个优化手段收回多少？**
 
 实验设计文档（唯一事实来源，含完整实验矩阵与读数判据）：`docs/experiment-design.md`。实验执行前先读它。
 
 ## 环境事实（已确认，勿重复询问或推导）
 
-- GPU：A100 80GB PCIe（HBM 1939 GB/s，BF16 312 TFLOPS）
-- Host：ARM 服务器，500GB 系统内存，远程访问
+- GPU：A100 40GB PCIe（GA100，HBM 1555 GB/s，BF16 312 TFLOPS）
+- Host：ARM 服务器，500GB 系统内存，DDR5-4800，2 socket × 8 通道（理论带宽：单节点 307 GB/s、聚合 614 GB/s；STREAM 实测待 D1）；CPU 2.9 GHz、2×128-bit FMA/cycle（= 256 bit/cycle，FP32 16 FLOP/cycle ≈ 46 GFLOPS/core）；每 socket 64 核 × 2 = 128 物理核，SMT2 = 256 逻辑核（SMT 不增 FMA，总算力 ~5.9 TFLOPS FP32），远程访问
 - 模型：Qwen3.8-Flash-Next（qwen4exp 架构）UD-Q4_K_XL，110GB，~131B 总参 / ~6B 激活，48 层 / 512 专家，含 51B 参数 PLE n-gram 表（tensor 名 `per_layer_token_embd`，推理时稀疏查表）
 - 引擎：llama.cpp 已构建且支持 qwen4exp；MTP 投机解码需按 PR #28243 另行构建（可与现有版本并存）
-- 待 D1 实测补全的分母：PCIe 代际、host STREAM 带宽、NUMA 拓扑、各 tensor 类型体积——核查结果回写实验设计文档第 0 节
+- 待 D1 实测补全的分母：PCIe 代际、host STREAM 带宽、NUMA 拓扑细节（GPU 所在节点、跨节点延迟）、各 tensor 类型体积——核查结果回写实验设计文档第 0 节
 
 ## 核心分析框架（所有实验围绕它）
 
@@ -22,7 +22,7 @@ ARM+A100 异构单机 LLM 推理性能上限研究。目标产出：可复现的
 Gap_total = U_ideal − B0 = gap_物理 + gap_实现 + gap_残差
 ```
 
-- **U_ideal**：全 GPU 常驻的 roofline（decode 理论 ~540 tok/s = 1939 GB/s ÷ 3.6 GB/token）。不可达（110 > 80），仅定义总 gap
+- **U_ideal**：全 GPU 常驻的 roofline（decode 理论 ~430 tok/s = 1555 GB/s ÷ 3.6 GB/token）。不可达（110 > 40），仅定义总 gap
 - **B0**：`-ngl 0` 纯 host 无优化基线
 - **gap_物理**（显存不足被迫在 CPU 计算）→ L1 放置策略最小化
 - **gap_实现**（attention 实现 / NUMA 远端访问 / mmap / 线程 / launch 间隙）→ L2-L4 消除
@@ -77,6 +77,9 @@ Gap_total = U_ideal − B0 = gap_物理 + gap_实现 + gap_残差
 BENCH_BIN=<path/to/llama-bench> ./scripts/bench.sh -e b0 -m <model.gguf> -ngl 0
 # 最优放置（PLE→CPU，其余 GPU）
 ./scripts/bench.sh -e l1_ple_cpu -m <model.gguf> -ngl 999 -ot "per_layer_token_embd\.weight=CPU"
+# 批量多值（llama-bench 原生语法，一次进程跑完整批；每配置输出一行 CSV）
+./scripts/bench.sh -e b0_tscan -m <model.gguf> -ngl 0 -t 64,128,192,256   # 线程扫描：物理核 128 为锚点，128 vs 256 检验 SMT 收益
+./scripts/bench.sh -e l1_ngl -m <model.gguf> -ngl 0-20+4 -ot "per_layer_token_embd\.weight=CPU"  # 粗扫；40G 下 ngl>21 必 OOM 且会中止整批，边界另跑
 # 卸载第 a-b 层专家（-ot 参数透传）
 ./scripts/bench.sh -e l1_off8 -m <model.gguf> -ngl 999 -ot "blk\.{a-b}\.ffn_.*_exps\.weight=CPU"
 # NUMA 绑定（命令前缀）

@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 模型文件（110GB GGUF 不入库；模型从 HF 下载，README/实验文档记录来源）
+*.gguf
+
+# profiling 原始产物（大文件；报告只用其截图/统计，CSV 数据在 data/ 保留跟踪）
+*.nsys-rep
+*.qdrep
+*.ncu-rep
+
+# 编辑器/系统
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# 杂项
+nohup.out
+.ipynb_checkpoints/
+
+# 注：data/（原始结果 + results.csv）是项目交付物，保持 git 跟踪

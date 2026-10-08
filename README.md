@@ -27,7 +27,7 @@ Gap_total = U_ideal − B0 = gap_物理 + gap_实现 + gap_残差
 | 项 | 值 |
 | --- | --- |
 | GPU | A100 40GB PCIe（GA100，HBM 1555 GB/s，BF16 312 TFLOPS） |
-| Host | ARM 服务器，500GB 系统内存，DDR5-4800 2P×8ch（理论 307 GB/s/节点，614 GB/s 聚合）；CPU 2.9 GHz × 2×128-bit FMA/cycle，128 物理核（SMT2 = 256 逻辑核），~5.9 TFLOPS FP32 |
+| Host | ARM 服务器，500GB 系统内存，DDR5-4800 2P×8ch（理论 307 GB/s/节点，614 GB/s 聚合）；CPU 2.9 GHz × 2×128-bit FMA/cycle，128 物理核，~5.9 TFLOPS FP32 |
 | 模型 | Qwen3.8-Flash-Next（qwen4exp）UD-Q4_K_XL，110GB，~131B 总参 / ~6B 激活，48 层 / 512 专家，含 51B 参数 PLE n-gram 表 |
 | 引擎 | llama.cpp（已构建，支持 qwen4exp；MTP 需按 PR #28243 另行构建） |
 

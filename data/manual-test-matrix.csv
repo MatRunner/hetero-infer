@@ -1,4 +1,4 @@
-test_id,batch,description,command,ngl,numa,threads,flash_attn,pp512_tok_s,tg128_tok_s,gpu_mem_peak_mib,gpu_util_pct,gpu_bw_util_pct,cpu_util_pct,host_rss_gib,eff_bw_gb_s,notes
+﻿test_id,batch,description,command,ngl,numa,threads,flash_attn,pp512_tok_s,tg128_tok_s,gpu_mem_peak_mib,gpu_util_pct,gpu_bw_util_pct,cpu_util_pct,host_rss_gib,eff_bw_gb_s,notes
 T01,B,基线 B0 全默认,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 0,0,none,default,off,,,,,,,,,,,,,,默认 t 应为 128（从本行输出确认）
 T02,B,B0 线程 t=64,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 0 -t 64,0,none,64,off,,,,,,,,,,,,,
 T03,B,B0 线程 t=192,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 0 -t 192,0,none,192,off,,,,,,,,,,,,,

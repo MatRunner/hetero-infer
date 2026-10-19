@@ -1,0 +1,19 @@
+test_id,batch,description,command,ngl,numa,threads,flash_attn,pp512_tok_s,tg128_tok_s,gpu_mem_peak_mib,gpu_util_pct,gpu_bw_util_pct,cpu_util_pct,host_rss_gib,eff_bw_gb_s,notes
+T01,B,基线 B0 全默认,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 0,0,none,default,off,,,,,,,,,,,,,,默认 t 应为 128（从本行输出确认）
+T02,B,B0 线程 t=64,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 0 -t 64,0,none,64,off,,,,,,,,,,,,,
+T03,B,B0 线程 t=192,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 0 -t 192,0,none,192,off,,,,,,,,,,,,,
+T04,B,B0 线程 t=256（SMT 全开）,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 0 -t 256,0,none,256,off,,,,,,,,,,,,,与 T01 对比即 SMT 收益
+T05,C,ngl=4 整层,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 4 -ot per_layer_token_embd\.weight=CPU,4,none,default,off,,,,,,,,,,,,,
+T06,C,ngl=8 整层,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 8 -ot per_layer_token_embd\.weight=CPU,8,none,default,off,,,,,,,,,,,,,
+T07,C,ngl=12 整层,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 12 -ot per_layer_token_embd\.weight=CPU,12,none,default,off,,,,,,,,,,,,,
+T08,C,ngl=16 整层,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 16 -ot per_layer_token_embd\.weight=CPU,16,none,default,off,,,,,,,,,,,,,
+T09,C,ngl=20 整层,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 20 -ot per_layer_token_embd\.weight=CPU,20,none,default,off,,,,,,,,,,,,,
+T10,C,ngl=22 边界探测（预期 OOM 则记录报错）,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 22 -ot per_layer_token_embd\.weight=CPU,22,none,default,off,,,,,,,,,,,,,必须单独跑（OOM 中止批量）
+T11,C,专家级对照（M 层专家→CPU / M 现场按显存余量定）,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 999 -ot blk.{a-b}.ffn_.*_exps.weight=CPU,expert,none,default,off,,,,,,,,,,,,,attention 全留 GPU / 与 T09 同显存水位对比
+T12,D,B0 + 绑节点0,numactl --cpunodebind 0 --membind 0 llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 0 -t 64,0,node0,64,off,,,,,,,,,,,,,B0 的 NUMA 收益（vs T01/T02）
+T13,D,B0 + 绑节点1,numactl --cpunodebind 1 --membind 1 llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl 0 -t 64,0,node1,64,off,,,,,,,,,,,,,
+T14,D,ngl* + 绑 GPU 节点,numactl --cpunodebind <gn> --membind <gn> llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl <ngl*> -ot per_layer_token_embd\.weight=CPU,ngl*,gpu_node,default,off,,,,,,,,,,,,,ngl* 与 <gn> 从 C 批次后回填
+T15,D,ngl* + 绑 GPU 节点 + t=64,numactl --cpunodebind <gn> --membind <gn> llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl <ngl*> -ot per_layer_token_embd\.weight=CPU -t 64,ngl*,gpu_node,64,off,,,,,,,,,,,,,
+T16,D,ngl* + 绑对侧节点,numactl --cpunodebind <other> --membind <other> llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl <ngl*> -ot per_layer_token_embd\.weight=CPU,ngl*,other_node,default,off,,,,,,,,,,,,,GPU 在节点 A 时权重全在对侧 → 远端惩罚放大
+T17,L2,ngl* + fa on,llama-bench -m <MODEL> -p 512 -n 128 -r 3 -ngl <ngl*> -ot per_layer_token_embd\.weight=CPU -fa on,ngl*,none,default,on,,,,,,,,,,,,,与 T09/T14 对照（fa 收益预期小）
+T18,S,全最优组合（现场定）,llama-bench -m <MODEL> -p 512 -n 128 -r 3 <best>,best,best,best,best,,,,,,,,,,,,,各变量最优组合 / 验证收益可加性

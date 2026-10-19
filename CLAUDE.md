@@ -6,7 +6,7 @@ ARM+A100 异构单机 LLM 推理性能上限研究。目标产出：可复现的
 
 **主问题：110GB 的 Qwen3.8-Flash-Next 在 40G A100 + 500G ARM 内存服务器上，性能上限在哪？无优化基线距上限多少？gap 由什么构成？每个优化手段收回多少？**
 
-实验设计文档（唯一事实来源，含完整实验矩阵与读数判据）：`docs/experiment-design.md`。实验执行前先读它。
+实验设计文档（唯一事实来源，含完整实验矩阵与读数判据）：`本地部署Qwen3-8.md`（根目录）。服务器统一测试清单（数据项/命令/判据，按批次）：`docs/server-runbook.md`。实验执行前先读两者。
 
 ## 环境事实（已确认，勿重复询问或推导）
 
@@ -34,7 +34,7 @@ Gap_total = U_ideal − B0 = gap_物理 + gap_实现 + gap_残差
 
 1. `-ot ...=CPU` 的语义是**该层在 CPU 上计算**，权重不过 PCIe。PCIe 只承担层间 activation（KB 级）+ 每边界一次同步往返
 2. 专家层卸载的瓶颈是 ARM 侧 dequant+GEMM 吞吐，**不是 PCIe 带宽**
-3. PLE 表放 host 近无损（每 token 只做 KB 级稀疏 gather）
+3. PLE 表放 host 近无损（每 token 只做 KB 级稀疏 gather）；且**必然在 host**（51GB > 40G 显存）——所有 ngl>0 配置必须带 `-ot per_layer_token_embd\.weight=CPU`，否则加载直接失败
 4. 混合注意力（Gated DeltaNet 固定状态 + QSA 稀疏）：KV 增长远低于 dense 公式；`-fa` 只作用于全注意力层，预测收益远小于 dense 模型经验值
 5. MoE decode 每步只读激活权重（~3.6GB/token），launch 间隙（48 层 × ~20 kernel × 3µs，llama.cpp 无 CUDA Graph）可能是同量级——**"launch-bound vs 带宽-bound"是本项目潜在头版发现**
 
@@ -43,22 +43,24 @@ Gap_total = U_ideal − B0 = gap_物理 + gap_实现 + gap_残差
 ```
 .
 ├── CLAUDE.md
+├── 本地部署Qwen3-8.md          # 实验设计与读数判据（唯一事实来源，持续回填实测结果）
 ├── docs/
-│   └── experiment-design.md   # 实验设计与读数判据（从博客迁入，持续回填实测结果）
+│   └── server-runbook.md      # 服务器统一测试清单（批次 A-E：环境校准/基线观测/放置/调优/profiling）
 ├── scripts/                   # 所有实验脚本，幂等可重跑
-│   ├── env_check.sh           # D1 核查（PCIe/STREAM/NUMA/tensor 清单/MTP 支持）（待实现）
+│   ├── env_check.sh           # 批次 A 环境核查（STREAM/NUMA/tensor 清单）（待实现，见 runbook）
 │   ├── bench.sh               # 跑一次基准：原始结果全量落盘 data/raw/<exp_id>/<时间戳>/，口径由脚本固定
 │   ├── parse_bench.py         # 解析 data/raw/ → data/results.csv（结构化 CSV，幂等全量重建）
 │   └── sweep_*.sh             # E1 放置 / L2-L5 手段 / MTP 扫描（待实现）
 ├── data/
+│   ├── manual-test-matrix.csv # 手动测试矩阵（服务器主线：预填配置/命令，结果列手填，CSV 即数据）
 │   ├── raw/                   # bench.sh 原始落盘（meta.json/results.json/bench.log/gpu_mem.csv/host_mem.csv，失败带 FAILED）
-│   └── results.csv            # 结构化结果（一行一次运行：完整命令、pp/tg、显存峰值、host 内存峰值）
+│   └── results.csv            # 结构化结果（自动模式：一行一次运行：完整命令、pp/tg、显存峰值、利用率）
 └── report/                    # 分析 notebook / 图（瀑布图、斜率曲线）
 ```
 
 约定：
 
-- 每个 CSV 行必须含：实验 ID、完整命令行、日期、pp512、tg128、显存峰值、host 内存
+- 每个 CSV 行必须含：实验 ID、完整命令行、日期、pp512、tg128、显存峰值、host 内存、CPU/GPU 利用率（avg/max，CPU 侧 vs GPU 侧时间损耗归因的第一层证据）
 - 脚本失败不静默：llama-bench 非零退出码直接中止 sweep
 - 报告图表可由 `data/` 的 CSV 重新生成，不存手工编辑的数字
 
@@ -75,8 +77,8 @@ Gap_total = U_ideal − B0 = gap_物理 + gap_实现 + gap_残差
 ```bash
 # 基线 B0（口径 p512/n128/r3 由 bench.sh 固定；llama-bench 路径用 BENCH_BIN 环境变量指定）
 BENCH_BIN=<path/to/llama-bench> ./scripts/bench.sh -e b0 -m <model.gguf> -ngl 0
-# 最优放置（PLE→CPU，其余 GPU）
-./scripts/bench.sh -e l1_ple_cpu -m <model.gguf> -ngl 999 -ot "per_layer_token_embd\.weight=CPU"
+# 最优放置候选（ngl* 由批次 C 扫描定位；-ot PLE=CPU 是 ngl>0 的必要参数，见物理模型 3）
+./scripts/bench.sh -e l1_n<ngl> -m <model.gguf> -ngl <ngl*> -ot "per_layer_token_embd\.weight=CPU"
 # 批量多值（llama-bench 原生语法，一次进程跑完整批；每配置输出一行 CSV）
 ./scripts/bench.sh -e b0_tscan -m <model.gguf> -ngl 0 -t 64,128,192,256   # 线程扫描：物理核 128 为锚点，128 vs 256 检验 SMT 收益
 ./scripts/bench.sh -e l1_ngl -m <model.gguf> -ngl 0-20+4 -ot "per_layer_token_embd\.weight=CPU"  # 粗扫；40G 下 ngl>21 必 OOM 且会中止整批，边界另跑

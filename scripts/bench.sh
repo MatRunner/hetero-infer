@@ -22,9 +22,10 @@
 #   meta.json    运行元数据（完整命令行、起止时间、退出码、主机信息）
 #   results.json llama-bench -o json 原始结果（含每次重复的 samples）
 #   bench.log    完整 stderr（warning / 进度 / md 汇总表，人类可读）
-#   gpu_mem.csv  GPU 显存采样（无 nvidia-smi 时仅表头）
-#   host_mem.csv 进程当前 RSS / 累计 RSS 峰值(HWM) / 系统已用内存采样
-#                （多配置批量运行时，parse_bench.py 按 test_time 分段归属到各配置）
+#   gpu_mem.csv  GPU 采样：显存用量 / SM 利用率 / 显存带宽利用率（无 nvidia-smi 时仅表头）
+#   host_mem.csv 进程当前 RSS / RSS 峰值(HWM) / 系统已用内存 / 进程 CPU 总占用（1 逻辑核=100%）
+#                （多配置批量运行时，parse_bench.py 按 test_time 分段归属到各配置；
+#                  util 的 avg/max 用于 CPU 侧 vs GPU 侧时间损耗的第一层归因）
 #   FAILED       退出码非 0 时创建（parse_bench.py 跳过该目录）
 
 set -euo pipefail
@@ -99,8 +100,8 @@ echo "== exp_id: $EXP_ID"
 echo "== cmd:    $CMD_STR"
 echo "== out:    $OUTDIR"
 
-echo "timestamp,gpu_mem_used_mib" > "$OUTDIR/gpu_mem.csv"
-echo "timestamp,proc_rss_mib,proc_rss_hwm_mib,sys_used_mib" > "$OUTDIR/host_mem.csv"
+echo "timestamp,gpu_mem_used_mib,gpu_util_pct,gpu_mem_bw_util_pct" > "$OUTDIR/gpu_mem.csv"
+echo "timestamp,proc_rss_mib,proc_rss_hwm_mib,sys_used_mib,proc_cpu_pct" > "$OUTDIR/host_mem.csv"
 
 # ---------- 启动基准 + 内存采样 ----------
 START_TS="$(date -Is)"; START_EPOCH="$(date +%s)"
@@ -110,9 +111,11 @@ MAIN_PID=$!
 if command -v nvidia-smi >/dev/null 2>&1; then
     (
         while kill -0 "$MAIN_PID" 2>/dev/null; do
-            used="$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | awk '{s+=$1} END{print s}')" || true
-            if [[ -n "${used:-}" ]]; then
-                echo "$(date +%s),${used}" >> "$OUTDIR/gpu_mem.csv"
+            # 显存求和（多卡）；SM/带宽利用率为百分比，多卡取 max；"[Not Supported]" 按 0 容错
+            line="$(nvidia-smi --query-gpu=memory.used,utilization.gpu,utilization.memory --format=csv,noheader,nounits 2>/dev/null)" || true
+            if [[ -n "${line:-}" ]]; then
+                vals="$(awk -F',' '{for(i=1;i<=NF;i++)gsub(/ /,"",$i); m+=$1; if($2+0>u)u=$2+0; if($3+0>b)b=$3+0} END{print m, u+0, b+0}' <<< "$line")" || true
+                [[ -n "${vals:-}" ]] && echo "$(date +%s),${vals}" >> "$OUTDIR/gpu_mem.csv"
             fi
             sleep "$INTERVAL"
         done
@@ -121,12 +124,26 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 fi
 
 (
+    prev_ticks=""; prev_epoch=""; clk="$(getconf CLK_TCK 2>/dev/null || echo 100)"
     while kill -0 "$MAIN_PID" 2>/dev/null; do
         rh="$(awk '/^VmRSS/{r=$2}/^VmHWM/{h=$2}END{print r+0, h+0}' "/proc/$MAIN_PID/status" 2>/dev/null)" || true
         sysmib="$(awk '/^MemTotal/{t=$2}/^MemAvailable/{a=$2}END{if(t&&a)print int((t-a)/1024)}' /proc/meminfo 2>/dev/null)" || true
+        # 进程 CPU 占用: /proc/<pid>/stat 的 utime+stime 差分（去掉 "pid (comm)" 前缀后为第 12/13 字段）
+        # 口径: 1 逻辑核 = 100%，满 256 逻辑核 = 25600%
+        cpu_pct=""
+        stat_line="$(cat "/proc/$MAIN_PID/stat" 2>/dev/null)" || true
+        if [[ -n "$stat_line" ]]; then
+            read -r ut st _ <<< "$(awk '{print $12, $13}' <<< "${stat_line##*) }")" || true
+            now_epoch="$(date +%s.%N)"
+            if [[ -n "${ut:-}" && -n "${prev_ticks:-}" && -n "${prev_epoch:-}" ]]; then
+                cpu_pct="$(awk -v ticks="$((${ut:-0} + ${st:-0}))" -v prev="$prev_ticks" -v clk="$clk" \
+                    -v a="$now_epoch" -v b="$prev_epoch" 'BEGIN{d=a-b; if(d<=0) d=0.001; printf "%.1f", ((ticks-prev)/clk)/d*100}')"
+            fi
+            prev_ticks="$((${ut:-0} + ${st:-0}))"; prev_epoch="$now_epoch"
+        fi
         rss_mib=0; hwm_mib=0
         IFS=' ' read -r rss_mib hwm_mib <<< "${rh:-0 0}" || true
-        echo "$(date +%s),$((rss_mib/1024)),$((hwm_mib/1024)),${sysmib:-}" >> "$OUTDIR/host_mem.csv"
+        echo "$(date +%s),$((rss_mib/1024)),$((hwm_mib/1024)),${sysmib:-},${cpu_pct}" >> "$OUTDIR/host_mem.csv"
         sleep "$INTERVAL"
     done
 ) &

@@ -10,16 +10,21 @@
     - 全量重建输出 CSV（按运行时间升序），幂等可重复执行
     - 支持批量多值运行（-ngl 0,16,32 / -t a,b,c 等）：llama-bench 一次进程输出
       多个测试配置，本脚本按配置分组，每个配置输出一行（pp/tg 两测试合并）
-    - 内存峰值按 test_time 分段归属到各配置：第 i 个测试的区间为
-      (前一测试结束时刻, 本测试结束时刻]，区间内采样最大值即该测试的峰值。
-      近似值（含前一测试的尾部与 warmup），单配置运行时等价于全程峰值
+    - 采样按 test_time 分段归属到各配置：第 i 个测试的区间为
+      (前一测试结束时刻, 本测试结束时刻]。
+      近似值（含前一测试的尾部与 warmup），单配置运行时等价于全程
+    - 利用率列（gpu_util/gpu_bw_util/cpu_util 的 avg/max）用于 CPU 侧 vs GPU 侧
+      时间损耗的第一层归因：GPU util 高 → GPU-bound（再看带宽 util 区分算力/带宽）；
+      GPU util 低 + CPU util 高 → host-bound
 
-CSV 列（CLAUDE.md 约定：实验 ID、完整命令行、日期、pp、tg、显存峰值、host 内存）:
+CSV 列（CLAUDE.md 约定：实验 ID、完整命令行、日期、pp、tg、显存峰值、host 内存、利用率）:
     exp_id, run_ts, command, model, model_size_gib,
     ngl, ncmoe, tensor_buft_overrides, flash_attn, n_threads, use_mmap, type_k, type_v, split_mode,
     pp_n, pp_tok_s, pp_avg_ms, pp_stddev_tok_s,
     tg_n, tg_tok_s, tg_avg_ms, tg_stddev_tok_s,
-    gpu_mem_peak_mib, host_rss_peak_gib, host_sys_used_peak_gib,
+    gpu_mem_peak_mib, gpu_util_avg_pct, gpu_util_max_pct, gpu_bw_util_avg_pct, gpu_bw_util_max_pct,
+    cpu_util_avg_pct, cpu_util_max_pct,
+    host_rss_peak_gib, host_sys_used_peak_gib,
     backends, gpu_info, cpu_info, build_commit, duration_s, exit_code, raw_dir
 """
 
@@ -39,7 +44,10 @@ FIELDS = [
     "use_mmap", "type_k", "type_v", "split_mode",
     "pp_n", "pp_tok_s", "pp_avg_ms", "pp_stddev_tok_s",
     "tg_n", "tg_tok_s", "tg_avg_ms", "tg_stddev_tok_s",
-    "gpu_mem_peak_mib", "host_rss_peak_gib", "host_sys_used_peak_gib",
+    "gpu_mem_peak_mib", "gpu_util_avg_pct", "gpu_util_max_pct",
+    "gpu_bw_util_avg_pct", "gpu_bw_util_max_pct",
+    "cpu_util_avg_pct", "cpu_util_max_pct",
+    "host_rss_peak_gib", "host_sys_used_peak_gib",
     "backends", "gpu_info", "cpu_info", "build_commit",
     "duration_s", "exit_code", "raw_dir",
 ]
@@ -98,15 +106,12 @@ def load_samples(path: Path, col: str):
         return []
 
 
-def peaks_per_test(run_start, rows, samples):
-    """按 test_time 把采样分段，返回与 rows 等长的每测试峰值列表。
+def slice_per_test(run_start, rows, samples):
+    """按 test_time 把采样分段，返回与 rows 等长的每测试样本值列表。
 
     第 i 个测试的区间 = (第 i-1 个测试的 test_time, 第 i 个测试的 test_time]，
     首个区间下界为运行开始时刻（meta.start）。
     """
-    n = len(rows)
-    if not samples:
-        return [None] * n
     bounds = []
     prev = run_start
     for r in rows:
@@ -115,11 +120,7 @@ def peaks_per_test(run_start, rows, samples):
             t = prev  # test_time 缺失时区间退化为空
         bounds.append((prev, t))
         prev = t
-    out = []
-    for lo, hi in bounds:
-        vals = [v for e, v in samples if e is not None and lo <= e <= hi]
-        out.append(max(vals) if vals else None)
-    return out
+    return [[v for e, v in samples if e is not None and lo <= e <= hi] for lo, hi in bounds]
 
 
 def fmt(v, nd=3):
@@ -139,9 +140,14 @@ def config_key(row):
     return tuple((f, row.get(f)) for f in CFG_FIELDS)
 
 
-def group_max(idxs, peaks):
-    vals = [peaks[i] for i in idxs if peaks[i] is not None]
-    return max(vals) if vals else None
+def group_agg(idxs, slices, fn):
+    """组内（同一配置的 pp/tg 等）所有测试区间采样合并后聚合"""
+    vals = [v for i in idxs for v in slices[i]]
+    return fn(vals) if vals else None
+
+
+def mean(xs):
+    return sum(xs) / len(xs)
 
 
 def parse_run(run_dir: Path):
@@ -161,11 +167,14 @@ def parse_run(run_dir: Path):
         warn(f"跳过 {run_dir.name}: results.json 为空或格式异常")
         return None
 
-    # 内存采样按 test_time 分段归属到每个测试行
+    # 采样按 test_time 分段归属到每个测试行（旧目录无 util 列时对应切片为空）
     run_start = to_epoch(meta.get("start"))
-    gpu_peaks = peaks_per_test(run_start, rows, load_samples(run_dir / "gpu_mem.csv", "gpu_mem_used_mib"))
-    rss_peaks = peaks_per_test(run_start, rows, load_samples(run_dir / "host_mem.csv", "proc_rss_mib"))
-    sys_peaks = peaks_per_test(run_start, rows, load_samples(run_dir / "host_mem.csv", "sys_used_mib"))
+    gpu_mem_slices = slice_per_test(run_start, rows, load_samples(run_dir / "gpu_mem.csv", "gpu_mem_used_mib"))
+    gpu_util_slices = slice_per_test(run_start, rows, load_samples(run_dir / "gpu_mem.csv", "gpu_util_pct"))
+    gpu_bw_slices = slice_per_test(run_start, rows, load_samples(run_dir / "gpu_mem.csv", "gpu_mem_bw_util_pct"))
+    rss_slices = slice_per_test(run_start, rows, load_samples(run_dir / "host_mem.csv", "proc_rss_mib"))
+    sys_slices = slice_per_test(run_start, rows, load_samples(run_dir / "host_mem.csv", "sys_used_mib"))
+    cpu_util_slices = slice_per_test(run_start, rows, load_samples(run_dir / "host_mem.csv", "proc_cpu_pct"))
 
     # 按配置分组（保持首次出现顺序）
     groups = {}
@@ -209,9 +218,15 @@ def parse_run(run_dir: Path):
             "tg_tok_s": fmt(tg.get("avg_ts")),
             "tg_avg_ms": ms(tg),
             "tg_stddev_tok_s": fmt(tg.get("stddev_ts")),
-            "gpu_mem_peak_mib": int(v) if (v := group_max(idxs, gpu_peaks)) is not None else "",
-            "host_rss_peak_gib": fmt(v / 1024, 2) if (v := group_max(idxs, rss_peaks)) is not None else "",
-            "host_sys_used_peak_gib": fmt(v / 1024, 2) if (v := group_max(idxs, sys_peaks)) is not None else "",
+            "gpu_mem_peak_mib": int(v) if (v := group_agg(idxs, gpu_mem_slices, max)) is not None else "",
+            "gpu_util_avg_pct": fmt(v, 1) if (v := group_agg(idxs, gpu_util_slices, mean)) is not None else "",
+            "gpu_util_max_pct": fmt(v, 1) if (v := group_agg(idxs, gpu_util_slices, max)) is not None else "",
+            "gpu_bw_util_avg_pct": fmt(v, 1) if (v := group_agg(idxs, gpu_bw_slices, mean)) is not None else "",
+            "gpu_bw_util_max_pct": fmt(v, 1) if (v := group_agg(idxs, gpu_bw_slices, max)) is not None else "",
+            "cpu_util_avg_pct": fmt(v, 1) if (v := group_agg(idxs, cpu_util_slices, mean)) is not None else "",
+            "cpu_util_max_pct": fmt(v, 1) if (v := group_agg(idxs, cpu_util_slices, max)) is not None else "",
+            "host_rss_peak_gib": fmt(v / 1024, 2) if (v := group_agg(idxs, rss_slices, max)) is not None else "",
+            "host_sys_used_peak_gib": fmt(v / 1024, 2) if (v := group_agg(idxs, sys_slices, max)) is not None else "",
             "backends": base.get("backends", ""),
             "gpu_info": base.get("gpu_info", ""),
             "cpu_info": base.get("cpu_info", ""),
@@ -262,11 +277,13 @@ def main():
 
     # 摘要
     print(f"== {len(records)} 行（配置级） -> {out_path}")
-    print(f"{'exp_id':<24} {'ngl':>4} {'t':>4} {'pp_tok_s':>9} {'tg_tok_s':>9} {'gpu_MiB':>9} {'rss_GiB':>8}")
+    print(f"{'exp_id':<24} {'ngl':>4} {'t':>4} {'pp_tok_s':>9} {'tg_tok_s':>9} {'gpu_MiB':>9} "
+          f"{'gpuU%':>6} {'cpuU%':>7} {'rss_GiB':>8}")
     for r in records:
         print(f"{str(r['exp_id']):<24} {str(r['ngl']):>4} {str(r['n_threads']):>4} "
               f"{str(r['pp_tok_s']):>9} {str(r['tg_tok_s']):>9} "
-              f"{str(r['gpu_mem_peak_mib']):>9} {str(r['host_rss_peak_gib']):>8}")
+              f"{str(r['gpu_mem_peak_mib']):>9} {str(r['gpu_util_avg_pct']):>6} {str(r['cpu_util_avg_pct']):>7} "
+              f"{str(r['host_rss_peak_gib']):>8}")
 
 
 if __name__ == "__main__":

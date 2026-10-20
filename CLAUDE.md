@@ -12,7 +12,7 @@ ARM+A100 异构单机 LLM 推理性能上限研究。目标产出：可复现的
 
 - GPU：A100 40GB PCIe（GA100，HBM 1555 GB/s，BF16 312 TFLOPS）
 - Host：ARM 服务器，500GB 系统内存，DDR5-4800，2 socket × 8 通道（理论带宽：单节点 307 GB/s、聚合 614 GB/s；STREAM 实测待 D1）；CPU 2.9 GHz、2×128-bit FMA/cycle（= 256 bit/cycle，FP32 16 FLOP/cycle ≈ 46 GFLOPS/core）；每 socket 64 核 × 2 = 128 物理核，SMT2 = 256 逻辑核（SMT 不增 FMA，总算力 ~5.9 TFLOPS FP32），远程访问
-- 模型：Qwen3.8-Flash-Next（qwen4exp 架构）UD-Q4_K_XL，110GB，~131B 总参 / ~6B 激活，48 层 / 512 专家，含 51B 参数 PLE n-gram 表（tensor 名 `per_layer_token_embd`，推理时稀疏查表）
+- 模型：Qwen3.8-Flash-Next（qwen4exp 架构）UD-Q4_K_XL，110GB，~175B 总参（逐层账 121B MoE + 2.5B attn + 51B PLE，与 110GB@~5bit 吻合；旧口径 131B 与文件体积不符，D1 gguf-dump 终裁）/ ~6B 激活，48 层 / 512 专家，含 51B 参数 PLE n-gram 表（tensor 名 `per_layer_token_embd`，推理时稀疏查表）
 - 引擎：llama.cpp 已构建且支持 qwen4exp；MTP 投机解码需按 PR #28243 另行构建（可与现有版本并存）
 - 待 D1 实测补全的分母：PCIe 代际、host STREAM 带宽、NUMA 拓扑细节（GPU 所在节点、跨节点延迟）、各 tensor 类型体积——核查结果回写实验设计文档第 0 节
 
@@ -37,6 +37,7 @@ Gap_total = U_ideal − B0 = gap_物理 + gap_实现 + gap_残差
 3. PLE 表放 host 近无损（每 token 只做 KB 级稀疏 gather）；且**必然在 host**（51GB > 40G 显存）——所有 ngl>0 配置必须带 `-ot per_layer_token_embd\.weight=CPU`，否则加载直接失败
 4. 混合注意力（Gated DeltaNet 固定状态 + QSA 稀疏）：KV 增长远低于 dense 公式；`-fa` 只作用于全注意力层，预测收益远小于 dense 模型经验值
 5. MoE decode 每步只读激活权重（~3.6GB/token），launch 间隙（48 层 × ~20 kernel × 3µs，llama.cpp 无 CUDA Graph）可能是同量级——**"launch-bound vs 带宽-bound"是本项目潜在头版发现**
+6. CPU 算力口径按 NEON 128-bit FP32 FMLA（5.9T）：Q4_K 为 dequant→FP32 FMA，FP16/BF16/SVE 路径不激活；`dotprod` 内核需构建 `-march` 激活（D1 A6 查 CFLAGS），详见理论预测性能.md ISA 小节
 
 ## 项目结构（agent 按此组织代码）
 

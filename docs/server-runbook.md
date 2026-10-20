@@ -46,6 +46,7 @@ pidstat -u -r -p $(pgrep -n llama-bench) 1
 | A3 | NUMA 拓扑 | `lscpu`、`numactl -H`、`nvidia-smi topo -m` | GPU 所在 socket（L3 绑定方案的分母）、节点间距离 |
 | A4 | PCIe 链路 | `nvidia-smi -q \| grep -A2 "GPU Link"` | Gen3/Gen4 ×16 → 物理模型佐证（瓶颈不在 PCIe，低优先级） |
 | A5 | llama-bench 参数集 | 服务器构建的 `llama-bench --help` 与本地对照 | 确认 `-fa` / `-fitt` / `--spec-type` 等选项存在性，防后续命令白跑 |
+| A6 | ISA 特性与构建目标 | `/proc/cpuinfo` Features（`grep -o 'sve\|bf16\|asimdbf16\|dotprod\|i8mm' \| sort -u`）+ 服务器构建的 CMakeCache CFLAGS | 算力口径佐证（5.9T 按 NEON FP32，见理论预测性能.md ISA 小节）；`dotprod` 未在 `-march` 激活 = 量化 dot 内核退化 FP32 路径（gap_实现 潜在项） |
 
 ## 批次 B：基线 B0 + 全观测
 

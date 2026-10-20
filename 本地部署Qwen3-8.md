@@ -10,7 +10,7 @@
 | --- | --- |
 | GPU | A100 40GB PCIe（GA100，HBM 1555 GB/s，BF16 312 TFLOPS） |
 | Host | ARM 服务器，500GB 内存，DDR5-4800，2 socket × 8 通道（理论：单节点 307 GB/s / 聚合 614 GB/s）；CPU 2.9 GHz × 2×128-bit FMA/cycle（FP32 ≈ 46 GFLOPS/core），每 socket 64 核 × 2 = 128 物理核（SMT2 = 256 逻辑核，总算力 ~5.9 TFLOPS） |
-| 模型 | Qwen3.8-Flash-Next（qwen4exp）UD-Q4_K_XL，110GB，~131B 总参 / ~6B 激活，48 层 / 512 专家 |
+| 模型 | Qwen3.8-Flash-Next（qwen4exp）UD-Q4_K_XL，110GB，~175B 总参（待 D1 gguf-dump 终裁）/ ~6B 激活，48 层 / 512 专家 |
 | 引擎 | llama.cpp（已构建，支持 qwen4exp） |
 
 D1 核查清单（决定后续所有分母）：
@@ -21,6 +21,8 @@ numactl -H                      # 各节点内存分布 + GPU 挂在哪个节点
 nvidia-smi -q | grep -A4 "GPU Link Info"   # PCIe 代际/宽度
 # host 内存带宽实测（STREAM triad），多路机器分"本节点/跨节点"各测一次
 # tensor 清单：gguf_dump.py 看 PLE 表 / 专家 / 注意力各占多少 GB，量化类型
+grep -o 'sve\|bf16\|asimdbf16\|dotprod\|i8mm' /proc/cpuinfo | sort -u   # ISA 特性：算力口径佐证（5.9T 按 NEON FP32）
+grep CMAKE_.*FLAGS /path/to/llama.cpp/build/CMakeCache.txt               # 构建 -march：dotprod 等内核是否激活
 ./llama-server --help | grep -A2 spec-type   # MTP 支持与否
 ```
 
@@ -189,7 +191,7 @@ MTP 不属于 gap 填补：一次权重读取验证 k 个 draft token，**分母
 - GitHub：脚本 + CSV + profiling 截图
 - 博客反哺：kvcache.md、从零学习模型量化.md、再战transformer.md（MoE 放置实证）、新篇"投机解码"
 
-> 简历 bullet（数字待填）：在 ARM+A100 40G 异构单机上研究 131B-A6B MoE 模型的推理性能上限：推导带宽 roofline（decode 理论 __ tok/s），将"基线 → 上限"的总 gap 分解为物理约束/实现损耗/固有残差三层；通过放置策略（51B PLE 表驻留 host 近无损）、NUMA 绑定、KV 量化等手段将性能从基线 __ tok/s 提升至 __ tok/s（本机可达上限的 __%），逐项量化各手段贡献；经 nsys 归因定位 decode 为 __-bound（launch 间隙占 __%），实测 MTP 投机解码进一步突破带宽上限 __x（acceptance __%）。
+> 简历 bullet（数字待填）：在 ARM+A100 40G 异构单机上研究 175B-A6B MoE 模型的推理性能上限：推导带宽 roofline（decode 理论 __ tok/s），将"基线 → 上限"的总 gap 分解为物理约束/实现损耗/固有残差三层；通过放置策略（51B PLE 表驻留 host 近无损）、NUMA 绑定、KV 量化等手段将性能从基线 __ tok/s 提升至 __ tok/s（本机可达上限的 __%），逐项量化各手段贡献；经 nsys 归因定位 decode 为 __-bound（launch 间隙占 __%），实测 MTP 投机解码进一步突破带宽上限 __x（acceptance __%）。
 
 ## 参考
 

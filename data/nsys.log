@@ -1,0 +1,226 @@
+解析下面sys内容：
+
+NOTICE: Existing SQLite export found: p512.sqlite
+        It is assumed file was previously exported from: p512.nsys-rep
+        Consider using --force-export=true if needed.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/nvtx_sum.py]... 
+
+ ** NVTX Range Summary (nvtx_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)  Med (ns)  Min (ns)  Max (ns)   StdDev (ns)   Style               Range             
+ --------  ---------------  ---------  --------  --------  --------  ---------  -----------  -------  ------------------------------
+    100.0      348,284,840     12,288  28,343.5  33,620.0    16,720  1,020,450     13,126.6  PushPop  CCCL:cub::DeviceTopK::MaxPairs
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/osrt_sum.py]... 
+
+ ** OS Runtime Summary (osrt_sum):
+
+ Time (%)   Total Time (ns)   Num Calls    Avg (ns)      Med (ns)     Min (ns)    Max (ns)      StdDev (ns)            Name         
+ --------  -----------------  ---------  ------------  -------------  --------  -------------  -------------  ----------------------
+     96.3  1,442,191,494,717     30,198  47,757,848.0    2,279,190.0     1,000    467,105,230   85,778,239.2  futex                 
+      3.5     53,027,852,788        543  97,657,187.5  100,120,350.0     1,370    100,385,260   14,477,797.9  poll                  
+      0.1      1,765,494,390        123  14,353,612.9        6,280.0     1,390  1,403,490,740  129,045,536.1  munmap                
+      0.1      1,151,554,080        138   8,344,594.8       14,630.0     4,330  1,032,556,870   88,361,643.9  mmap                  
+      0.0        181,917,120      2,233      81,467.6        3,070.0     1,000      5,293,080      345,363.8  ioctl                 
+      0.0         20,559,130         66     311,502.0      300,550.0   286,440        482,380       37,170.2  pthread_create        
+      0.0          2,112,370      1,805       1,170.3        1,090.0     1,000         44,980        1,135.4  fread                 
+      0.0          1,490,140          2     745,070.0      745,070.0    33,420      1,456,720    1,006,425.1  fgets                 
+      0.0            792,980         12      66,081.7       22,130.0    14,330        316,960      106,824.5  sem_timedwait         
+      0.0            642,140         27      23,783.0       13,150.0     9,130        146,360       29,660.2  mmap64                
+      0.0            378,680         40       9,467.0        3,890.0     1,000        158,440       24,674.3  fopen                 
+      0.0            328,620        281       1,169.5        1,080.0     1,000          3,970          345.5  stat                  
+      0.0            308,740         48       6,432.1        6,820.0     1,770         15,370        2,879.1  open64                
+      0.0            109,830          1     109,830.0      109,830.0   109,830        109,830            0.0  pthread_cond_wait     
+      0.0             73,960         24       3,081.7        1,645.0     1,080         25,220        4,934.2  fclose                
+      0.0             33,080         12       2,756.7        2,980.0     1,110          5,250        1,254.2  write                 
+      0.0             25,250          6       4,208.3        4,390.0     1,190          6,780        2,042.8  open                  
+      0.0             23,110          4       5,777.5        3,555.0     1,730         14,270        5,899.3  fputc                 
+      0.0             22,120          2      11,060.0       11,060.0     9,600         12,520        2,064.8  socket                
+      0.0             17,470          8       2,183.8        1,670.0     1,040          4,140        1,237.0  close                 
+      0.0             11,700          4       2,925.0        2,945.0     1,590          4,220        1,084.5  pipe2                 
+      0.0             11,530          7       1,647.1        1,510.0     1,110          2,630          505.4  read                  
+      0.0             10,760          1      10,760.0       10,760.0    10,760         10,760            0.0  connect               
+      0.0              7,720          2       3,860.0        3,860.0     1,070          6,650        3,945.7  fputs                 
+      0.0              5,420          2       2,710.0        2,710.0     2,310          3,110          565.7  pthread_cond_broadcast
+      0.0              4,390          2       2,195.0        2,195.0     1,920          2,470          388.9  fwrite                
+      0.0              3,480          3       1,160.0        1,180.0     1,010          1,290          141.1  fcntl                 
+      0.0              2,470          1       2,470.0        2,470.0     2,470          2,470            0.0  bind                  
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/cuda_api_sum.py]... 
+
+ ** CUDA API Summary (cuda_api_sum):
+
+ Time (%)  Total Time (ns)  Num Calls    Avg (ns)     Med (ns)    Min (ns)    Max (ns)    StdDev (ns)                 Name              
+ --------  ---------------  ---------  ------------  -----------  ---------  -----------  ------------  --------------------------------
+     85.2   19,192,390,027     65,588     292,620.4    207,675.0      2,730    7,946,890     352,990.4  cudaMemcpyAsync                 
+     10.7    2,410,788,022     16,001     150,664.8     25,560.0        860    6,756,040     435,738.1  cudaStreamSynchronize           
+      1.0      217,491,440     58,072       3,745.2      4,000.0        990    4,151,360      24,844.0  cudaLaunchKernel                
+      0.9      209,314,400      1,219     171,709.9     45,540.0     16,210   12,154,500   1,096,953.1  cudaGraphInstantiate            
+      0.7      152,175,240          4  38,043,810.0     30,535.0      9,680  152,104,490  76,040,454.9  cudaMemGetInfo                  
+      0.6      134,221,270      3,657      36,702.6     18,760.0      7,830    1,917,630     173,812.5  cudaGraphLaunch                 
+      0.4       89,713,890      1,219      73,596.3     18,940.0      8,540    6,088,380     521,238.6  cudaGraphExecDestroy            
+      0.2       37,616,250     12,666       2,969.9      4,170.0        490      214,910       3,432.7  cudaMemsetAsync                 
+      0.1       21,736,870         18   1,207,603.9    790,895.0     90,310    5,090,260   1,233,872.6  cuLibraryLoadData               
+      0.1       19,425,840      1,219      15,935.9      2,830.0        920    1,407,200     128,530.2  cudaGraphDestroy                
+      0.0        9,917,200      1,219       8,135.5      1,670.0        940      770,560      62,063.3  cudaGraphExecUpdate             
+      0.0        9,393,110     58,072         161.7        130.0        100       14,110         130.9  cuKernelGetName                 
+      0.0        5,000,870      1,219       4,102.4      2,960.0      2,060       23,510       2,484.9  cudaStreamBeginCapture          
+      0.0        4,818,350          1   4,818,350.0  4,818,350.0  4,818,350    4,818,350           0.0  cudaMallocHost                  
+      0.0        4,757,170        452      10,524.7      5,980.0      1,770    2,305,480     108,219.3  cudaLaunchKernelExC             
+      0.0        2,836,710          1   2,836,710.0  2,836,710.0  2,836,710    2,836,710           0.0  cudaFreeHost                    
+      0.0        2,776,520        452       6,142.7      1,740.0        630    1,876,360      88,266.9  cuKernelGetFunction             
+      0.0        2,593,640        392       6,616.4      5,935.0      1,040       27,090       4,075.1  cudaMemcpy2DAsync               
+      0.0        2,483,210      1,219       2,037.1      1,020.0        660      124,990       9,451.7  cudaStreamEndCapture            
+      0.0        2,401,860        452       5,313.8      5,930.0      1,310       37,610       3,307.3  cuLaunchKernel                  
+      0.0        1,343,620          6     223,936.7     97,455.0      6,130      892,600     334,467.9  cudaFree                        
+      0.0        1,274,260          3     424,753.3     95,820.0     80,110    1,098,330     583,387.4  cuMemSetAccess                  
+      0.0          787,030          5     157,406.0    122,300.0      3,080      295,960     116,510.4  cudaMalloc                      
+      0.0          463,170          4     115,792.5     28,505.0     23,170      382,990     178,151.7  cudaDeviceSynchronize           
+      0.0          240,360      1,252         192.0        180.0        140        2,100         116.9  cudaGetDeviceProperties         
+      0.0          206,220        882         233.8        200.0        130        3,780         145.4  cuGetProcAddress_v2             
+      0.0          166,080          1     166,080.0    166,080.0    166,080      166,080           0.0  cuMemUnmap                      
+      0.0          158,620          3      52,873.3     55,380.0     46,500       56,740       5,561.2  cuMemCreate                     
+      0.0           53,290         26       2,049.6      1,195.0        380        4,770       1,604.9  cuLibraryGetKernel              
+      0.0           31,110          1      31,110.0     31,110.0     31,110       31,110           0.0  cudaStreamCreateWithFlags       
+      0.0           26,440          1      26,440.0     26,440.0     26,440       26,440           0.0  cuMemAddressReserve             
+      0.0           23,570          1      23,570.0     23,570.0     23,570       23,570           0.0  cudaStreamDestroy               
+      0.0           16,210         18         900.6        680.0        530        3,180         614.3  cudaEventDestroy                
+      0.0           15,440          3       5,146.7      5,030.0      4,480        5,930         732.0  cuMemMap                        
+      0.0           15,310         18         850.6        520.0        430        3,300         776.8  cudaEventCreateWithFlags        
+      0.0            7,750          1       7,750.0      7,750.0      7,750        7,750           0.0  cuMemAddressFree                
+      0.0            5,610          4       1,402.5      1,390.0        760        2,070         547.1  cuInit                          
+      0.0            3,250          3       1,083.3        170.0        120        2,960       1,625.4  cuModuleGetLoadingMode          
+      0.0            2,610          3         870.0        520.0        480        1,610         641.2  cudaGetDriverEntryPointByVersion
+      0.0              770          3         256.7        260.0        200          310          55.1  cuMemRelease                    
+      0.0              690          1         690.0        690.0        690          690           0.0  cuMemGetAllocationGranularity   
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/cuda_gpu_kern_sum.py]... 
+
+ ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances   Avg (ns)     Med (ns)    Min (ns)   Max (ns)   StdDev (ns)                                                  Name                                                
+ --------  ---------------  ---------  -----------  -----------  ---------  ---------  -----------  ----------------------------------------------------------------------------------------------------
+     24.3      104,016,159         92  1,130,610.4  1,042,156.0    654,549  2,832,775    407,807.8  void mul_mat_q<(ggml_type)12, (int)128, (bool)0>(const char *, const int *, const int *, const int …
+     18.0       76,916,745         43  1,788,761.5  1,671,123.0  1,182,611  4,282,376    566,616.2  void mul_mat_q<(ggml_type)7, (int)128, (bool)0>(const char *, const int *, const int *, const int *…
+     13.2       56,437,212        398    141,802.0     76,347.0     27,326  2,473,087    225,885.8  void mul_mat_q<(ggml_type)8, (int)128, (bool)0>(const char *, const int *, const int *, const int *…
+      9.5       40,698,305     12,288      3,312.0      3,215.5      1,311      6,176      1,923.6  void cub::_V_300200_SM_800::detail::topk::DeviceTopKKernel<cub::_V_300200_SM_800::detail::topk::pol…
+      7.6       32,723,561         36    908,987.8    875,910.5    872,967  1,477,792    139,892.2  void gated_delta_net_cuda<(int)128, (bool)0, (bool)0>(const float *, const float *, const float *, …
+      6.1       26,276,978      6,144      4,276.9      4,256.0      4,031      4,640         60.8  void cub::_V_300200_SM_800::detail::topk::DeviceTopKKernel<cub::_V_300200_SM_800::detail::topk::pol…
+      2.1        8,846,240      6,144      1,439.8      1,408.0      1,344      1,888         56.6  void cub::_V_300200_SM_800::detail::topk::DeviceTopKLastFilterKernel<cub::_V_300200_SM_800::detail:…
+      1.9        8,180,691        564     14,504.8      9,727.0      2,400     58,236     14,405.5  void k_bin_bcast<&op_add, float, float, float, const float *>(const T2 *, const T3 *, T4 *, unsigne…
+      1.8        7,865,469        331     23,762.7     30,718.0      2,527     57,628     15,196.9  void k_bin_bcast<&op_mul, float, float, float, const float *>(const T2 *, const T3 *, T4 *, unsigne…
+      1.5        6,375,258         95     67,108.0     65,211.0     64,476    113,944      9,300.0  void mul_mat_q<(ggml_type)8, (int)128, (bool)1>(const char *, const int *, const int *, const int *…
+      1.4        6,151,790        141     43,629.7     46,557.0     34,621     75,803      7,076.8  void mm_ids_helper<(int)10>(const int *, int *, int *, int *, int, int, int, int, int, bool)        
+      1.2        5,338,984        143     37,335.6     42,461.0     21,919     61,308      9,274.9  void unary_gated_op_kernel<&op_sigmoid, float>(const T2 *, const T2 *, T2 *, long, long, long, long)
+      1.2        4,946,463        262     18,879.6     16,127.0     12,863     39,262      5,208.5  void mul_mat_q_stream_k_fixup<(ggml_type)8, (int)128, (bool)0>(const int *, const int *, float *, f…
+      1.1        4,509,787         99     45,553.4     44,157.0      3,936     71,963      8,077.0  void rms_norm_f32<(int)1024, (bool)0, (bool)0>(const float *, float *, int, long, long, long, float…
+      1.0        4,438,692        493      9,003.4      7,615.0      3,007     31,870      6,128.5  void quantize_mmq_q8_1<(mmq_q8_1_ds_layout)0, (bool)0>(const float *, const int *, void *, long, lo…
+      0.8        3,277,930          2  1,638,965.0  1,638,965.0  1,638,613  1,639,317        497.8  void mul_mat_q<(ggml_type)13, (int)128, (bool)0>(const char *, const int *, const int *, const int …
+      0.7        3,021,434        107     28,237.7     30,878.0      5,791     36,829      8,063.6  void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_64x64_16x6_tn_align4>(T1::Params)               
+      0.6        2,412,319         47     51,325.9     50,941.0     49,308     58,428      1,661.6  moe_weighted_reduction_f32(const float *, const float *, const float *, float *, long, int)         
+      0.6        2,381,313         36     66,147.6     63,723.5     63,132    109,049     10,555.5  void rms_norm_f32<(int)256, (bool)1, (bool)0>(const float *, float *, int, long, long, long, float,…
+      0.5        2,356,068         37     63,677.5     59,740.0     59,036    109,177     13,634.4  void concat_non_cont<unsigned int, (int)0>(const char *, const char *, char *, long, long, long, lo…
+      0.5        2,272,242         97     23,425.2     22,782.0      2,463     40,926      4,515.5  void k_bin_bcast<&op_repeat, float, float, float, >(const T2 *, const T3 *, T4 *, unsigned int, uns…
+      0.5        2,014,461         36     55,957.3     54,285.0     53,436     84,186      6,810.7  void ssm_conv_long_token_f32<(bool)1, (unsigned long)128, (unsigned long)4, (long)32>(const float *…
+      0.4        1,731,084         95     18,221.9     17,662.0     16,991     32,669      2,960.0  void mul_mat_q_stream_k_fixup<(ggml_type)8, (int)128, (bool)1>(const int *, const int *, float *, f…
+      0.4        1,712,162        393      4,356.6      3,007.0      1,632     18,079      3,440.0  scale_f32(const float *, float *, float, float, long)                                               
+      0.4        1,686,676         94     17,943.4     19,119.0     14,367     25,470      2,647.6  void quantize_mmq_q8_1<(mmq_q8_1_ds_layout)1, (bool)1>(const float *, const int *, void *, long, lo…
+      0.3        1,488,961         94     15,840.0     17,231.0      3,999     40,029     11,752.7  void unary_gated_op_kernel<&op_silu, float>(const T2 *, const T2 *, T2 *, long, long, long, long)   
+      0.3        1,388,416         16     86,776.0     58,124.0     57,980    173,204     51,297.5  void cpy_scalar<&cpy_1_scalar<float, float>>(const char *, char *, long, long, long, long, long, lo…
+      0.3        1,219,886         12    101,657.2    101,721.0    100,634    102,745        824.8  void flash_attn_ext_f16<(int)256, (int)256, (int)8, (int)8, (bool)0, (bool)0, (bool)0>(const char *…
+      0.2        1,001,855         47     21,316.1     20,671.0     20,383     36,318      3,171.9  void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_64x128_32x6_tn_align4>(T1::Params)              
+      0.2          804,747         43     18,715.0     18,527.0     18,142     27,518      1,385.3  void quantize_mmq_q8_1<(mmq_q8_1_ds_layout)1, (bool)0>(const float *, const int *, void *, long, lo…
+      0.2          788,328        226      3,488.2      3,136.0      2,912      8,319        806.3  void cublasLt::splitKreduce_kernel<(int)32, (int)16, int, float, float, float, float, (bool)0, floa…
+      0.2          712,724         72      9,898.9      9,471.0      9,216     17,375      1,771.1  void l2_norm_f32<(int)32>(const float *, float *, int, long, long, long, float)                     
+      0.2          683,603         72      9,494.5     10,559.5      7,328     16,511      2,088.8  void cutlass::Kernel2<cutlass_80_tensorop_s1688gemm_64x64_32x6_tn_align4>(T1::Params)               
+      0.1          553,979         48     11,541.2      5,263.5      2,720     33,022     12,509.7  void rms_norm_f32<(int)256, (bool)0, (bool)0>(const float *, float *, int, long, long, long, float,…
+      0.1          497,408         12     41,450.7     41,437.5     41,278     41,629        112.0  void flash_attn_stream_k_fixup_general<(int)256, (int)8, (int)8>(float *, const float2 *, int, int,…
+      0.1          418,950         47      8,913.8      8,608.0      8,447     15,935      1,480.3  void topk_moe_cuda<(int)512, (bool)0>(const float *, float *, int *, float *, int, int, float, floa…
+      0.1          353,962        179      1,977.4      1,920.0      1,408      4,127        410.3  void unary_op_kernel<&op_sigmoid, float>(const T2 *, T2 *, int)                                     
+      0.1          338,763         48      7,057.6      4,528.0      2,752     16,671      5,543.5  void rope_multi<(bool)1, (bool)0, float>(const T3 *, T3 *, int, int, int, int, int, int, int, int, …
+      0.1          289,642         96      3,017.1      2,496.0      2,463     43,709      4,218.8  void unary_op_kernel<&op_silu, float>(const T2 *, T2 *, int)                                        
+      0.1          272,436         47      5,796.5      5,696.0      5,440      9,951        629.4  void mul_mat_vec_f<float, float, (int)1, (int)256, (bool)0, (bool)0>(const T1 *, const float *, con…
+      0.0          212,150         24      8,839.6      8,800.0      8,735      9,152        102.7  void convert_unary<float, __nv_bfloat16>(const void *, T2 *, long, long, long, uint3, long, long, l…
+      0.0          182,356         12     15,196.3     15,151.0     14,911     15,551        181.8  ampere_s16816gemm_bf16_64x64_sliced1x2_ldg8_stages_64x6_tn                                          
+      0.0           86,680         12      7,223.3      7,231.0      7,167      7,296         43.6  ampere_s16816gemm_bf16_128x64_ldg8_stages_32x6_tn                                                   
+      0.0           83,997         36      2,333.3      2,240.0      2,207      4,128        441.7  void unary_op_kernel<&op_softplus, float>(const T2 *, T2 *, int)                                    
+      0.0           74,718         24      3,113.3      3,104.0      2,751      3,520        350.7  void cpy_scalar_transpose<float>(const char *, char *, long, long, long, long, long, long, long, lo…
+      0.0           62,330         12      5,194.2      5,184.0      4,991      5,344         79.0  void cpy_scalar_contiguous<__half, float>(const char *, char *, long)                               
+      0.0           48,287         12      4,023.9      4,016.0      3,904      4,192         84.1  void k_set_rows<float, int, __half>(const T1 *, const T2 *, T3 *, long, long, long, long, long, lon…
+      0.0           48,030         12      4,002.5      4,000.0      3,936      4,064         31.9  void k_get_rows_float_vec<float>(const T1 *, const int *, T1 *, long, long, uint3, unsigned long, u…
+      0.0           43,741         12      3,645.1      3,648.0      3,584      3,680         31.7  void k_bin_bcast<&op_add, __half, __half, __half, const __half *>(const T2 *, const T3 *, T4 *, uns…
+      0.0           37,951         12      3,162.6      3,072.0      3,040      3,424        144.4  void k_get_rows_float<__half, float>(const T1 *, const int *, T2 *, long, long, uint3, unsigned lon…
+      0.0           33,568         12      2,797.3      2,784.0      2,752      2,848         25.4  void unary_op_kernel<&op_relu, float>(const T2 *, T2 *, int)                                        
+      0.0           30,236         12      2,519.7      2,527.0      2,496      2,528         14.3  void fill_kernel<__half>(T1 *, long, T1)                                                            
+      0.0           29,888         12      2,490.7      2,496.0      2,464      2,496         12.5  void fill_kernel<float>(T1 *, long, T1)                                                             
+      0.0           27,231          1     27,231.0     27,231.0     27,231     27,231          0.0  void reduce_rows_f32<(bool)0>(const float *, float *, int)                                          
+      0.0            8,704          3      2,901.3      2,976.0      2,304      3,424        563.7  void k_get_rows_float<float, float>(const T1 *, const int *, T2 *, long, long, uint3, unsigned long…
+      0.0            3,488          1      3,488.0      3,488.0      3,488      3,488          0.0  void op_clamp_kernel<float>(const T1 *, T1 *, T1, T1, int)                                          
+      0.0            3,456          1      3,456.0      3,456.0      3,456      3,456          0.0  void unary_op_kernel<&op_abs, float>(const T2 *, T2 *, int)                                         
+      0.0            3,456          1      3,456.0      3,456.0      3,456      3,456          0.0  void unary_op_kernel<&op_sqrt, float>(const T2 *, T2 *, int)                                        
+      0.0            3,392          1      3,392.0      3,392.0      3,392      3,392          0.0  void unary_op_kernel<&op_sgn, float>(const T2 *, T2 *, int)                                         
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/cuda_gpu_mem_time_sum.py]... 
+
+ ** CUDA GPU MemOps Summary (by Time) (cuda_gpu_mem_time_sum):
+
+ Time (%)  Total Time (ns)  Count   Avg (ns)   Med (ns)   Min (ns)  Max (ns)   StdDev (ns)            Operation           
+ --------  ---------------  ------  ---------  ---------  --------  ---------  -----------  ------------------------------
+     99.3   19,265,719,973  64,930  296,715.2  190,612.0     1,055  8,556,849    366,186.3  [CUDA memcpy Host-to-Device]  
+      0.6      118,776,767     632  187,937.9  158,613.0     6,015    480,448    168,310.2  [CUDA memcpy Device-to-Host]  
+      0.1        9,918,815   6,333    1,566.2    1,568.0     1,023      2,336         90.8  [CUDA memset]                 
+      0.0        1,727,636     209    8,266.2   10,303.0     2,208     27,166      4,765.7  [CUDA memcpy Device-to-Device]
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/cuda_gpu_mem_size_sum.py]... 
+
+ ** CUDA GPU MemOps Summary (by Size) (cuda_gpu_mem_size_sum):
+
+ Total (MB)   Count   Avg (MB)  Med (MB)  Min (MB)  Max (MB)  StdDev (MB)            Operation           
+ -----------  ------  --------  --------  --------  --------  -----------  ------------------------------
+ 124,862.440  64,930     1.923     1.229     0.000    33.423        2.366  [CUDA memcpy Host-to-Device]  
+     782.483     632     1.238     1.047     0.041     3.146        1.107  [CUDA memcpy Device-to-Host]  
+     542.876     209     2.597     1.049     0.041    20.972        2.822  [CUDA memcpy Device-to-Device]
+      55.103   6,333     0.009     0.009     0.000     0.009        0.001  [CUDA memset]                 
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/openmp_sum.py]... 
+SKIPPED: p512.sqlite does not contain OpenMP event data.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/opengl_khr_range_sum.py]... 
+SKIPPED: p512.sqlite does not contain KHR Extension (KHR_DEBUG) data.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/opengl_khr_gpu_range_sum.py]... 
+SKIPPED: p512.sqlite does not contain GPU KHR Extension (KHR_DEBUG) data.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/vulkan_marker_sum.py]... 
+SKIPPED: p512.sqlite does not contain Vulkan Debug Extension (Vulkan Debug Util) data.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/vulkan_gpu_marker_sum.py]... 
+SKIPPED: p512.sqlite does not contain GPU Vulkan Debug Extension (GPU Vulkan Debug markers) data.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/dx11_pix_sum.py]... 
+SKIPPED: p512.sqlite does not contain DX11 CPU debug markers.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/dx12_gpu_marker_sum.py]... 
+SKIPPED: p512.sqlite does not contain DX12 GPU debug markers.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/dx12_pix_sum.py]... 
+SKIPPED: p512.sqlite does not contain DX12 CPU debug markers.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/wddm_queue_sum.py]... 
+SKIPPED: p512.sqlite does not contain WDDM context data.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/um_sum.py]... 
+SKIPPED: p512.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/um_total_sum.py]... 
+SKIPPED: p512.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/um_cpu_page_faults_sum.py]... 
+SKIPPED: p512.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/openacc_sum.py]... 
+SKIPPED: p512.sqlite does not contain OpenACC event data.
+
+Processing [p512.sqlite] with [/opt/nvidia/nsight-systems-cli/2026.5.1/target-linux-sbsa-armv8/reports/syscall_sum.py]... 
+SKIPPED: p512.sqlite does not contain syscall data.
